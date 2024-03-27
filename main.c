@@ -72,19 +72,22 @@ Tetromino tetrominoZ = {
 
 void printTetromino(Tetromino tetromino) {
 
-  // wchar_t *unicode_char = L"██";
+  // wchar_t unicode_char = L'█';
   wchar_t *unicode_char = L"󰝤 ";
 
   for (int row = 0; row < TETROMINO_ROWS; ++row) {
     for (int col = 0; col < TETROMINO_COLS; ++col) {
       if (tetromino.model[row][col] == 1) {
-        printf("\x1b[3%dm%ls", tetromino.color, unicode_char);
+        // wprintw(stdscr, "%lc ", unicode_char);
+        printw()
       } else {
-        printf("  ");
+        printw("  ");
       }
     }
-    printf("\n");
+    printw("\n");
   }
+
+  refresh();
 }
 
 int main() {
