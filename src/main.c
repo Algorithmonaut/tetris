@@ -9,11 +9,6 @@
 #include <unistd.h>
 #include <wchar.h>
 
-// Simple implementation of tetris in the cli
-// https://en.wikipedia.org/wiki/Tetromino
-
-// Implement SRS
-
 ////////////////////////////////////////////////////////////////////////////////
 //// Definitions
 
@@ -27,10 +22,7 @@
 #define ANSI_COLOR_WHITE "\x1b[37m"
 #define ANSI_COLOR_RESET "\x1b[0m"
 
-#define TETROMINO_ROWS 4
-#define TETROMINO_COLS 4
-
-#define GRID_ROWS 20
+#define GRID_ROWS 23
 #define GRID_COLS 10
 int grid[GRID_ROWS][GRID_COLS];
 
@@ -38,10 +30,10 @@ int grid[GRID_ROWS][GRID_COLS];
 
 #define TRUE 1
 #define FALSE 0
+#define DONE 2
 
 WINDOW *gridWindow;
-
-static const chtype BLOCK = ' ' | A_REVERSE;
+WINDOW *previewWindow;
 
 typedef enum {
   DEFAULT,
@@ -71,6 +63,9 @@ typedef struct {
   unsigned long long score;
   int difficulty;
   ActiveTetromino current;
+  Tetromino *future;
+  int touchdown;
+  int isKeyPressed;
 } CTX;
 
 CTX ctx;
@@ -129,6 +124,7 @@ void initColorPairs() {
   init_pair(MAGENTA, COLOR_MAGENTA, COLOR_BLACK);
   init_pair(CYAN, COLOR_CYAN, COLOR_BLACK);
   init_pair(WHITE, COLOR_WHITE, COLOR_BLACK);
+  // init_pair(100, COLOR_BLACK, COLOR_WHITE);
 }
 
 void initWindows() {
@@ -143,6 +139,34 @@ void initWindows() {
     gridWindow = newwin(height, width, y, x);
     box(gridWindow, 0, 0);
   }
+
+  {
+    const int x = centerX + GRID_COLS + 4;
+    const int y = centerY - GRID_ROWS / 2;
+    const int width = 4 * 2 + 2;
+    const int height = 4 + 2;
+    previewWindow = newwin(height, width, y, x);
+  }
+}
+
+void initGraphics(void) {
+  initscr();
+  cbreak();
+  keypad(stdscr, TRUE);
+  noecho();
+  curs_set(FALSE);
+  timeout(10);
+
+  atexit((void (*)(void))endwin);
+
+  // use_default_colors();
+  start_color();
+  initColorPairs();
+
+  initGrid();
+
+  refresh();
+  initWindows();
 }
 
 wchar_t *square = L"󰝤";
@@ -159,6 +183,9 @@ int getCurrentYPixelPos(int pixel) {
 int getCurrentXPixelPos(int pixel) {
   return ctx.current.tetromino->model[ctx.current.rotation][pixel] % 4;
 }
+
+int getFutureYPixelPos(int pixel) { return ctx.future->model[0][pixel] / 4; }
+int getFutureXPixelPos(int pixel) { return ctx.future->model[0][pixel] % 4; }
 
 int getRotatedXPixelPos(int pixel) {
   int rotation = ctx.current.rotation == 3 ? 0 : ctx.current.rotation + 1;
@@ -187,6 +214,25 @@ void printGrid() {
   }
 }
 
+void clearPreview() {
+  for (int row = 0; row < 4; ++row) {
+    for (int col = 0; col < 4; ++col) {
+      mvwaddch(previewWindow, row + 1, col * 2 + 1, ' ');
+    }
+  }
+}
+
+void printPreview() {
+  clearPreview();
+  for (int i = 0; i < 4; ++i) {
+    int row = getFutureYPixelPos(i);
+    int col = getFutureXPixelPos(i);
+    wattron(previewWindow, COLOR_PAIR(ctx.future->color));
+    mvwprintw(previewWindow, row + 1, col * 2 + 1, "%ls", square);
+    wattroff(previewWindow, COLOR_PAIR(ctx.future->color));
+  }
+}
+
 void printTetrominoOnGrid(void) {
   wattron(gridWindow, COLOR_PAIR(ctx.current.tetromino->color));
 
@@ -205,9 +251,6 @@ void printTetrominoOnGrid(void) {
 }
 
 void printTetrominoPreviewOnGrid(int height) {
-  mvprintw(0, 0, "%i\n", height);
-  mvprintw(1, 0, "%i\n", ctx.current.posY);
-  mvprintw(2, 0, "%i\n", GRID_ROWS);
   wattron(gridWindow, COLOR_PAIR(ctx.current.tetromino->color));
 
   int x = ctx.current.posX * 2;
@@ -226,28 +269,7 @@ void printTetrominoPreviewOnGrid(int height) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-//// Main
-
-void initGraphics(void) {
-  initscr();
-  cbreak();
-  keypad(stdscr, TRUE);
-  noecho();
-  curs_set(FALSE);
-  timeout(10);
-
-  atexit((void (*)(void))endwin);
-
-  // use_default_colors();
-  start_color();
-  initColorPairs();
-
-  initGrid();
-
-  refresh();
-  initWindows();
-  printGrid();
-}
+//// Other
 
 int getCurrentFinalHeight() {
   int height;
@@ -266,8 +288,53 @@ int getCurrentFinalHeight() {
   return 0;
 }
 
+void checkLines() {
+  int linesAccumulator = 0;
+  for (int row = GRID_ROWS; row > 0; --row) {
+    int accumulator = 0;
+    for (int col = 0; col < GRID_COLS; ++col) {
+      if (grid[row][col] != 0) {
+        ++accumulator;
+      }
+    }
+
+    if (accumulator == GRID_COLS) {
+      ++linesAccumulator;
+      for (int movedRow = row; movedRow > 0; --movedRow) {
+        for (int col = 0; col < GRID_COLS; ++col) {
+          grid[movedRow][col] = grid[movedRow - 1][col];
+        }
+      }
+    }
+  }
+
+  switch (linesAccumulator) {
+  case 1:
+    ctx.score += 40;
+    break;
+  case 2:
+    ctx.score += 100;
+    break;
+  case 3:
+    ctx.score += 300;
+    break;
+  case 4:
+    ctx.score += 1200;
+    break;
+  }
+
+  for (int col = 0; col < GRID_COLS; ++col) {
+    if (grid[3][col] != 0) {
+      endwin();
+      printf("\n\n%lli\n\n", ctx.score);
+      exit(0);
+    }
+  }
+}
+
 void updateCurrentTetromino() {
-  ctx.current.tetromino = selectTetromino();
+  ctx.current.tetromino = ctx.future;
+  ctx.future = selectTetromino();
   ctx.current.posX = GRID_COLS / 4 + 1;
   ctx.current.posY = 0;
   ctx.current.rotation = 0;
@@ -283,20 +350,50 @@ void stickTetrominoToGrid() {
   }
 }
 
+void checkTetrominoCollision() {
+  if (ctx.touchdown == DONE) {
+    return;
+  }
+
+  int accumulator = 0;
+
+  for (int i = 0; i < 4; ++i) {
+    int col = getCurrentXPixelPos(i) + ctx.current.posX;
+    int row = getCurrentYPixelPos(i) + ctx.current.posY + 1;
+
+    if (row >= GRID_ROWS || grid[row][col] != 0) {
+      ctx.touchdown = TRUE;
+    } else {
+      ++accumulator;
+    }
+  }
+
+  if (accumulator >= 4) {
+    ctx.touchdown = FALSE;
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//// Current tetromino controls
+
 void moveLeft() {
   for (int i = 0; i < 4; ++i) {
     int col = getCurrentXPixelPos(i) + ctx.current.posX;
-    if (col == 0) {
+    int row = getCurrentYPixelPos(i) + ctx.current.posY;
+    if (col == 0 || grid[row][col - 1] != 0) {
       return;
     }
   }
 
   --ctx.current.posX;
 }
+
 void moveRight() {
   for (int i = 0; i < 4; ++i) {
     int col = getCurrentXPixelPos(i) + ctx.current.posX;
-    if (col == GRID_COLS - 1) {
+    int row = getCurrentYPixelPos(i) + ctx.current.posY;
+
+    if (col == GRID_COLS - 1 || grid[row][col + 1] != 0) {
       return;
     }
   }
@@ -306,9 +403,10 @@ void moveRight() {
 
 void rotate() {
   for (int i = 0; i < 4; ++i) {
-    int col = getRotatedXPixelPos(i) + ctx.current.posX + 1;
+    int col = getRotatedXPixelPos(i) + ctx.current.posX;
+    int row = getCurrentYPixelPos(i) + ctx.current.posY;
 
-    if (col == GRID_COLS + 1 || col == 0) {
+    if (col == GRID_COLS || col == -1 || grid[row][col] != 0) {
       return;
     }
   }
@@ -323,15 +421,20 @@ void moveBottom() {
   updateCurrentTetromino();
 }
 
+////////////////////////////////////////////////////////////////////////////////
+//// Player controls
+
 void handleInputs() {
   switch (getch()) {
   case 'h':
   case KEY_LEFT:
     moveLeft();
+    ctx.isKeyPressed = TRUE;
     break;
   case 'l':
   case KEY_RIGHT:
     moveRight();
+    ctx.isKeyPressed = TRUE;
     break;
   case 'k':
   case KEY_UP:
@@ -342,22 +445,23 @@ void handleInputs() {
     break;
   case 'q':
     exit(0);
+    break;
   }
 }
+////////////////////////////////////////////////////////////////////////////////
+//// Main
 
-void checkTetrominoCollision() {
-  for (int i = 0; i < 4; ++i) {
-    int col = getCurrentXPixelPos(i) + ctx.current.posX;
-    int row = getCurrentYPixelPos(i) + ctx.current.posY + 1;
-
-    if (row >= GRID_ROWS || grid[row][col] != 0) {
-      stickTetrominoToGrid();
-      updateCurrentTetromino();
-    }
+int main(int argc, char *argv[]) {
+  if (argc != 2) {
+    printf("Usage: %s <fall per sec>\n", argv[0]);
+    return 1;
   }
-}
 
-int main(void) {
+  ctx.touchdown = FALSE;
+  ctx.isKeyPressed = FALSE;
+  ctx.future = selectTetromino();
+  ctx.score = 0;
+
   srand(time(NULL));
   setlocale(LC_ALL, "");
 
@@ -365,16 +469,7 @@ int main(void) {
 
   updateCurrentTetromino();
 
-  /*
-  for (int i = 0; i < TETROMINOS_COUNT; ++i) {
-    printTetromino(*tetrominos[i]);
-  }
-  */
-
-  // int nextTetromino = selectTetromino();
-  // int currentTetromino = selectTetromino();
-
-  const float levelSpeed = 3;
+  int levelSpeed = atoi(argv[1]);
 
   struct timeval startTime, currentTime;
   long elapsedTime;
@@ -385,25 +480,43 @@ int main(void) {
     elapsedTime = (currentTime.tv_sec - startTime.tv_sec) * 1000000 +
                   (currentTime.tv_usec - startTime.tv_usec);
 
+    if (elapsedTime >= 1000000 / levelSpeed) {
+      if (ctx.isKeyPressed == FALSE && ctx.touchdown == TRUE) {
+        ctx.touchdown = DONE;
+      }
+
+      ctx.isKeyPressed = FALSE;
+
+      if (ctx.touchdown == DONE) {
+        stickTetrominoToGrid();
+        updateCurrentTetromino();
+        ctx.touchdown = FALSE;
+      }
+
+      if (ctx.touchdown == FALSE) {
+        ++ctx.current.posY;
+      }
+      startTime = currentTime;
+    }
+
     handleInputs();
     printGrid();
+    printPreview();
+
+    if (ctx.score) {
+      mvprintw(LINES / 2 - GRID_ROWS / 2 + 4, COLS / 2 + GRID_COLS + 4, "%lli",
+               ctx.score);
+    }
 
     printTetrominoPreviewOnGrid(getCurrentFinalHeight());
     printTetrominoOnGrid();
 
-    if (elapsedTime >= 1000000 / levelSpeed) {
-      ++ctx.current.posY;
-      startTime = currentTime;
-    }
-
-    // currentTetromino = nextTetromino;
-    // nextTetromino = selectTetromino();
     checkTetrominoCollision();
+    checkLines();
 
     wrefresh(gridWindow);
+    wrefresh(previewWindow);
   }
-
-  // endwin();
 
   return EXIT_SUCCESS;
 }
