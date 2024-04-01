@@ -4,6 +4,7 @@
 #include <ncurses.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 #include <wchar.h>
@@ -144,6 +145,9 @@ void initWindows() {
   }
 }
 
+wchar_t *square = L"󰝤";
+wchar_t *wireSquare = L"󰝣";
+
 ////////////////////////////////////////////////////////////////////////////////
 //// Helpers
 
@@ -173,17 +177,14 @@ void printGrid() {
     for (int col = 0; col < GRID_COLS; col++) {
       if (grid[row][col] != 0) {
         wattron(gridWindow, COLOR_PAIR(grid[row][col]));
-        mvwaddch(gridWindow, row + 1, col * 2 + 1, BLOCK);
-        mvwaddch(gridWindow, row + 1, col * 2 + 2, BLOCK);
+        mvwprintw(gridWindow, row + 1, col * 2 + 1, "%ls", square);
         wattroff(gridWindow, COLOR_PAIR(grid[row][col]));
       } else {
+        // We still need to do that to clear the grid
         mvwaddch(gridWindow, row + 1, col * 2 + 1, ' ');
-        mvwaddch(gridWindow, row + 1, col * 2 + 2, ' ');
       }
     }
   }
-
-  wrefresh(gridWindow);
 }
 
 void printTetrominoOnGrid(void) {
@@ -196,12 +197,32 @@ void printTetrominoOnGrid(void) {
     int row = getCurrentYPixelPos(i);
     int col = getCurrentXPixelPos(i);
 
-    mvwaddch(gridWindow, y + row + 1, x + col * 2 + 1, BLOCK);
-    mvwaddch(gridWindow, y + row + 1, x + col * 2 + 2, BLOCK);
+    mvwprintw(gridWindow, y + row + 1, x + col * 2 + 1, "%ls", square);
+    // mvwaddch(gridWindow, y + row + 1, x + col * 2 + 2, BLOCK);
   }
 
   wattroff(gridWindow, COLOR_PAIR(ctx.current.tetromino->color));
-  wrefresh(gridWindow);
+}
+
+void printTetrominoPreviewOnGrid(int height) {
+  mvprintw(0, 0, "%i\n", height);
+  mvprintw(1, 0, "%i\n", ctx.current.posY);
+  mvprintw(2, 0, "%i\n", GRID_ROWS);
+  wattron(gridWindow, COLOR_PAIR(ctx.current.tetromino->color));
+
+  int x = ctx.current.posX * 2;
+  int y = ctx.current.posY;
+
+  for (int i = 0; i < 4; ++i) {
+    int row = getCurrentYPixelPos(i);
+    int col = getCurrentXPixelPos(i);
+
+    mvwprintw(gridWindow, height + y + row + 1, x + col * 2 + 1, "%ls",
+              wireSquare);
+    // mvwaddch(gridWindow, y + row + 1, x + col * 2 + 2, BLOCK);
+  }
+
+  wattroff(gridWindow, COLOR_PAIR(ctx.current.tetromino->color));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -213,7 +234,7 @@ void initGraphics(void) {
   keypad(stdscr, TRUE);
   noecho();
   curs_set(FALSE);
-  timeout(100);
+  timeout(10);
 
   atexit((void (*)(void))endwin);
 
@@ -226,6 +247,40 @@ void initGraphics(void) {
   refresh();
   initWindows();
   printGrid();
+}
+
+int getCurrentFinalHeight() {
+  int height;
+  for (height = 0; height < GRID_ROWS - ctx.current.posY; ++height) {
+    for (int i = 0; i < 4; ++i) {
+      int col = getCurrentXPixelPos(i) + ctx.current.posX;
+      int row = getCurrentYPixelPos(i) + height + ctx.current.posY + 1;
+
+      // if (row <= 4 || grid[col][row] != 0) {
+      if (row >= GRID_ROWS || grid[row][col] != 0) {
+        return height;
+      }
+    }
+  }
+
+  return 0;
+}
+
+void updateCurrentTetromino() {
+  ctx.current.tetromino = selectTetromino();
+  ctx.current.posX = GRID_COLS / 4 + 1;
+  ctx.current.posY = 0;
+  ctx.current.rotation = 0;
+}
+
+void stickTetrominoToGrid() {
+  for (int i = 0; i < 4; ++i) {
+    int col = getCurrentXPixelPos(i);
+    int row = getCurrentYPixelPos(i);
+
+    grid[row + ctx.current.posY][col + ctx.current.posX] =
+        ctx.current.tetromino->color;
+  }
 }
 
 void moveLeft() {
@@ -253,14 +308,20 @@ void rotate() {
   for (int i = 0; i < 4; ++i) {
     int col = getRotatedXPixelPos(i) + ctx.current.posX + 1;
 
-    if (col == GRID_COLS || col == 0) {
+    if (col == GRID_COLS + 1 || col == 0) {
       return;
     }
   }
 
   ctx.current.rotation == 3 ? ctx.current.rotation = 0 : ++ctx.current.rotation;
 };
-void moveBottom(){};
+
+void moveBottom() {
+  ctx.current.posY += getCurrentFinalHeight();
+
+  stickTetrominoToGrid();
+  updateCurrentTetromino();
+}
 
 void handleInputs() {
   switch (getch()) {
@@ -284,15 +345,21 @@ void handleInputs() {
   }
 }
 
-void updateCurrentTetromino() {
-  ctx.current.tetromino = selectTetromino();
-  ctx.current.posX = GRID_COLS / 4 + 1;
-  ctx.current.posY = 0;
-  ctx.current.rotation = 0;
+void checkTetrominoCollision() {
+  for (int i = 0; i < 4; ++i) {
+    int col = getCurrentXPixelPos(i) + ctx.current.posX;
+    int row = getCurrentYPixelPos(i) + ctx.current.posY + 1;
+
+    if (row >= GRID_ROWS || grid[row][col] != 0) {
+      stickTetrominoToGrid();
+      updateCurrentTetromino();
+    }
+  }
 }
 
 int main(void) {
   srand(time(NULL));
+  setlocale(LC_ALL, "");
 
   initGraphics();
 
@@ -307,28 +374,33 @@ int main(void) {
   // int nextTetromino = selectTetromino();
   // int currentTetromino = selectTetromino();
 
-  const int levelSpeed = 1;
+  const float levelSpeed = 3;
 
-  clock_t startTime, currentTime;
-  double elapsedTime;
-
-  startTime = clock();
+  struct timeval startTime, currentTime;
+  long elapsedTime;
+  gettimeofday(&startTime, NULL);
 
   while (TRUE) {
-    currentTime = clock();
-    elapsedTime = (double)(currentTime - startTime) / CLOCKS_PER_SEC;
+    gettimeofday(&currentTime, NULL);
+    elapsedTime = (currentTime.tv_sec - startTime.tv_sec) * 1000000 +
+                  (currentTime.tv_usec - startTime.tv_usec);
 
     handleInputs();
     printGrid();
+
+    printTetrominoPreviewOnGrid(getCurrentFinalHeight());
     printTetrominoOnGrid();
 
-    if (elapsedTime * 1000 >= (float)1 / levelSpeed) {
+    if (elapsedTime >= 1000000 / levelSpeed) {
       ++ctx.current.posY;
       startTime = currentTime;
     }
 
     // currentTetromino = nextTetromino;
     // nextTetromino = selectTetromino();
+    checkTetrominoCollision();
+
+    wrefresh(gridWindow);
   }
 
   // endwin();
