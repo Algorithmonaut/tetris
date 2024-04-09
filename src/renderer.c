@@ -15,21 +15,6 @@ wchar_t *wireSquare = L"▢";
 
 ////
 
-void renderGrid() {
-  for (int row = 0; row < GRID_ROWS; row++) {
-    for (int col = 0; col < GRID_COLS; col++) {
-      if (grid[row][col] != 0) {
-        wattron(gridWindow, COLOR_PAIR(grid[row][col]));
-        mvwprintw(gridWindow, row + 1, col * 2 + 1, "%ls", square);
-        wattroff(gridWindow, COLOR_PAIR(grid[row][col]));
-      } else {
-        // We still need to do that to clear the grid
-        mvwaddch(gridWindow, row + 1, col * 2 + 1, ' ');
-      }
-    }
-  }
-}
-
 void renderScore() { mvwprintw(scoreWindow, 1, 2, "%lli", ctx.score); }
 
 void renderPreview() {

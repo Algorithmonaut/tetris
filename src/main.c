@@ -1,6 +1,7 @@
 #include <complex.h>
 #include <locale.h>
 #include <ncurses.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
@@ -37,6 +38,29 @@ int getFinalHeight() {
   }
 
   return finalHeight;
+}
+
+// Check for collision (of either the current rotation or the next rotation)
+// using the current tetromino and the translation vector
+bool isColliding(int translateRow, int translateCol, bool nextRotation) {
+  for (int i = 0; i < 4; ++i) {
+    Vec2i pixelPos;
+    if (nextRotation) {
+      pixelPos = getRotatedPixelPos(i);
+    } else {
+      pixelPos = getCurrentPixelPos(i);
+    }
+
+    pixelPos.row += translateRow + ctx.current.posRow;
+    pixelPos.col += translateCol + ctx.current.posCol;
+
+    if (pixelPos.row >= GRID_ROWS || pixelPos.col == 0 ||
+        pixelPos.col >= GRID_COLS || grid[pixelPos.row][pixelPos.col] != 0) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 void checkCollision() {

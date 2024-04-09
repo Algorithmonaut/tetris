@@ -4,7 +4,7 @@
 #include <ncurses.h>
 #include <wchar.h>
 
-// Uncomment for using nerd font characters
+// If not defined, unicode characters will be used instead
 // #define USE_NERD_FONT
 
 //// Colors
@@ -26,22 +26,23 @@ typedef enum {
 typedef struct {
   Color color;
   int model[4][4];
-} Tetromino;
+} Tetrimino;
 
 typedef struct {
-  Tetromino *tetromino;
+  Tetrimino *tetrimino;
   int posCol;
   int posRow;
   int rotation;
-} ActiveTetromino;
+} ActiveTetrimino;
 
 typedef struct {
   unsigned long long score;
   int difficulty;
-  ActiveTetromino current;
-  Tetromino *next;
+  ActiveTetrimino current;
+  Tetrimino *next;
   int touchdown;
   int isKeyPressed;
+  int levelSpeed;
 } CTX;
 
 extern CTX ctx;
@@ -52,9 +53,9 @@ extern CTX ctx;
 #define GRID_COLS 10
 extern int grid[GRID_ROWS][GRID_COLS];
 
-//// Tetromino
+//// Tetrimino
 
-#define TETROMINOS_COUNT 7
+#define TETRIMINOS_COUNT 7
 
 //// Victory condition
 
